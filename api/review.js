@@ -1,6 +1,6 @@
+import { google } from 'googleapis';
 
 export default async function handler(req, res) {
-  // Allow requests from your Shopify store
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
@@ -10,7 +10,6 @@ export default async function handler(req, res) {
 
   const { reviewer_name, area, rating, review_text, date, source } = req.body;
 
-  // Basic validation
   if (!reviewer_name || !rating || !review_text) {
     return res.status(400).json({ error: 'Missing required fields' });
   }
@@ -51,16 +50,40 @@ export default async function handler(req, res) {
 
     const shopifyData = await shopifyRes.json();
     const userErrors = shopifyData?.data?.metaobjectCreate?.userErrors;
-
     if (userErrors?.length > 0) {
       return res.status(400).json({ error: userErrors[0].message });
     }
 
-    // 2. Save to Google Sheets (coming next)
+    // 2. Save to Google Sheets
+    const credentials = JSON.parse(process.env.GOOGLE_SERVICE_ACCOUNT);
+    const auth = new google.auth.GoogleAuth({
+      credentials,
+      scopes: ['https://www.googleapis.com/auth/spreadsheets'],
+    });
+
+    const sheets = google.sheets({ version: 'v4', auth });
+    await sheets.spreadsheets.values.append({
+      spreadsheetId: process.env.GOOGLE_SHEET_ID,
+      range: 'Sheet1!A:H',
+      valueInputOption: 'RAW',
+      requestBody: {
+        values: [[
+          reviewer_name,
+          area || '',
+          rating,
+          review_text,
+          date || new Date().toISOString().split('T')[0],
+          source || 'Direct',
+          'Pending',
+          new Date().toISOString()
+        ]],
+      },
+    });
 
     return res.status(200).json({ success: true, message: 'Review submitted!' });
 
   } catch (error) {
-    return res.status(500).json({ error: 'Something went wrong' });
+    console.error(error);
+    return res.status(500).json({ error: 'Something went wrong', details: error.message });
   }
 }
